@@ -1,6 +1,7 @@
 module Main where
 
 import           Control.Concurrent
+import           Data.Time
 import           Network.Socket     hiding (recv, send)
 import           System.IO
 
@@ -19,12 +20,21 @@ main = do
 mainLoop :: Socket -> IO ()
 mainLoop sock = do
     conn <- accept sock     -- accept a connection and handle it
-    runConn conn            -- run our server's logic
+    forkIO $ runConn conn   -- run our server's logic
     mainLoop sock           -- repeat
 
 runConn :: (Socket, SockAddr) -> IO ()
 runConn (sock, _) = do
     hdl <- socketToHandle sock ReadWriteMode
     hSetBuffering hdl NoBuffering
-    hPutStrLn hdl "hello :~|\n"
+
+    t1 <- getTimeStr
+    hPutStrLn hdl $ "[" ++ t1 ++ "] " ++ "hello :~|\n"
+    threadDelay 5000000
+
+    t2 <- getTimeStr
+    hPutStrLn hdl $ "[" ++ t2 ++ "] " ++  "bye...\n"
     hClose hdl
+
+getTimeStr :: IO String
+getTimeStr = formatTime defaultTimeLocale "%F %T" <$> getCurrentTime
