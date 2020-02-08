@@ -1,9 +1,8 @@
-{-# LANGUAGE OverloadedStrings #-}
 module Main where
 
 import           Control.Concurrent
-import           Network.Socket            hiding (recv, send)
-import           Network.Socket.ByteString (recv, send)
+import           Network.Socket     hiding (recv, send)
+import           System.IO
 
 hints = defaultHints
 host  = "127.0.0.1"
@@ -25,5 +24,7 @@ mainLoop sock = do
 
 runConn :: (Socket, SockAddr) -> IO ()
 runConn (sock, _) = do
-    send sock "hello :~|\n"
-    close sock
+    hdl <- socketToHandle sock ReadWriteMode
+    hSetBuffering hdl NoBuffering
+    hPutStrLn hdl "hello :~|\n"
+    hClose hdl
