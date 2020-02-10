@@ -49,7 +49,7 @@ runConn (sock, _) chan users dbConn = do
     hdl <- socketToHandle sock ReadWriteMode
     hSetBuffering hdl NoBuffering
 
-    let runSession' = runSession hdl chan
+    let runSession' = runSession hdl chan users
     handle (\(SomeException _) -> return ()) $ do
         los  <- loginOrSignUp hdl
         user <- if los then loginUser hdl users dbConn
@@ -59,13 +59,14 @@ runConn (sock, _) chan users dbConn = do
 
     hClose hdl                      -- close the handle
 
-runSession :: Handle -> Chan Msg -> User -> IO ()
-runSession hdl chan (userID, name) = do
+runSession :: Handle -> Chan Msg -> MVar [User] -> User -> IO ()
+runSession hdl chan users (userID, name) = do
     let broadcast msg = getTimeStr >>= \ts ->
             writeChan chan (userID, "[" ++ ts ++ "] " ++ msg)
 
     broadcast $ "--> " ++ name ++ " entered the chat."
     hPutStrLn hdl $ "Welcome " ++ name ++ "!"
+    hPutStrLn hdl   "Type ':help' for help."
 
     commLine <- dupChan chan        -- duplicate the channel
 
@@ -80,8 +81,13 @@ runSession hdl chan (userID, name) = do
     handle (\(SomeException _) -> return ()) $ fix $ \loop -> do
         line <- init <$> hGetLine hdl
         case line of
-          -- If the user wants to quit, send a message and break the loop
-          "quit" -> hPutStrLn hdl "Bye!"
+          ":help" -> hPutStrLn hdl "Type ':quit' to quit and ':here' to list\
+                                  \ who is online." >> loop
+          ":here" -> do
+              online <- readMVar users
+              let printUser (_, name) = hPutStrLn hdl $ " - " ++ name
+              mapM_ printUser online >> loop
+          ":quit" -> hPutStrLn hdl "Bye!"
           -- otherwise, continue looping.
           _      -> broadcast (name ++ ": " ++ line) >> loop
 
@@ -110,7 +116,11 @@ createUser hdl users dbConn =
             uname <- lift $ init <$> hGetLine hdl
             lift $ hPutStr hdl "Type a new password: "
             pwd   <- lift $ init <$> hGetLine hdl
+
+            lift $ hPutStrLn hdl "Creating user..."
             DB.addUser dbConn (T.pack uname) (T.pack pwd)
+
+            lift $ hPutStrLn hdl "Authenticating..."
             (DB.UserField id_ u _) <- noteT "Failed to log in." $
                 DB.login dbConn (T.pack uname) (T.pack pwd)
             let user = (id_, T.unpack u)
@@ -130,6 +140,8 @@ loginUser hdl users dbConn =
             uname <- lift $ init <$> hGetLine hdl
             lift $ hPutStr hdl "Password: "
             pwd   <- lift $ init <$> hGetLine hdl
+
+            lift $ hPutStrLn hdl "Authenticating..."
             (DB.UserField id_ u _) <- noteT "Invalid username or password." $
                 DB.login dbConn (T.pack uname) (T.pack pwd)
             let user = (id_, T.unpack u)
