@@ -2,6 +2,7 @@
 module Main where
 
 import           Control.Concurrent
+import           Control.Concurrent.MVar
 import           Control.Error
 import           Control.Exception
 import           Control.Monad             (unless)
@@ -16,7 +17,7 @@ import           System.IO
 
 type Msg = (Int, String)
 
-type User = String
+type User = (Int, String)
 
 hints = defaultHints
 host  = "127.0.0.1"
@@ -34,32 +35,34 @@ main = do
     _ <- forkIO $ fix $ \loop -> do -- read from the channel to prevent
         (_, _) <- readChan chan     -- memory from leaking.
         loop
-    mainLoop sock chan dbConn 0
+    users <- newMVar []
+    mainLoop sock chan users dbConn
 
-mainLoop :: Socket -> Chan Msg -> DB.Connection -> Int -> IO ()
-mainLoop sock chan dbConn msgNum = do
+mainLoop :: Socket -> Chan Msg -> MVar [User] -> DB.Connection -> IO ()
+mainLoop sock chan users dbConn = do
     conn <- accept sock                      -- accept a connection and handle it
-    forkIO $ runConn conn chan dbConn msgNum -- run our server's logic
-    mainLoop sock chan dbConn $! msgNum + 1  -- repeat with increased msgNum
+    forkIO $ runConn conn chan users dbConn  -- run our server's logic
+    mainLoop sock chan users dbConn          -- repeat
 
-runConn :: (Socket, SockAddr) -> Chan Msg -> DB.Connection -> Int -> IO ()
-runConn (sock, _) chan dbConn msgNum = do
+runConn :: (Socket, SockAddr) -> Chan Msg -> MVar [User] -> DB.Connection -> IO ()
+runConn (sock, _) chan users dbConn = do
     hdl <- socketToHandle sock ReadWriteMode
     hSetBuffering hdl NoBuffering
 
-    let runSession' = runSession hdl chan msgNum
+    let runSession' = runSession hdl chan
     handle (\(SomeException _) -> return ()) $ do
         los  <- loginOrSignUp hdl
-        name <- if los then loginUser hdl dbConn
-                       else createUser hdl dbConn
-        runSession' name
+        user <- if los then loginUser hdl users dbConn
+                       else createUser hdl users dbConn
+        runSession' user
+        removeLogoutUser user users -- log out the user
 
-    hClose hdl  -- close the handle
+    hClose hdl                      -- close the handle
 
-runSession :: Handle -> Chan Msg -> Int -> String -> IO ()
-runSession hdl chan msgNum name = do
+runSession :: Handle -> Chan Msg -> User -> IO ()
+runSession hdl chan (userID, name) = do
     let broadcast msg = getTimeStr >>= \ts ->
-            writeChan chan (msgNum, "[" ++ ts ++ "] " ++ msg)
+            writeChan chan (userID, "[" ++ ts ++ "] " ++ msg)
 
     broadcast $ "--> " ++ name ++ " entered the chat."
     hPutStrLn hdl $ "Welcome " ++ name ++ "!"
@@ -70,7 +73,7 @@ runSession hdl chan msgNum name = do
     readThread <- forkIO $ fix $ \loop -> do
         (nextID, line) <- readChan commLine
         -- Print the message, unless it is from this user.
-        unless (nextID == msgNum) $ hPutStrLn hdl line
+        unless (nextID == userID) $ hPutStrLn hdl line
         loop
 
     -- read lines from the socket and broadcast them to `chan`
@@ -90,7 +93,7 @@ loginOrSignUp :: Handle -> IO Bool
 loginOrSignUp hdl =
     let askUser = do
             hPutStr hdl "Log in or sign up? [L/s] "
-            T.toUpper <$> T.strip <$> TIO.hGetLine hdl
+            T.toUpper . T.strip <$> TIO.hGetLine hdl
         evalLoop = do
             ans <- askUser
             case ans of
@@ -100,37 +103,61 @@ loginOrSignUp hdl =
               _   -> hPutStrLn hdl "Invalid input" >> evalLoop
      in evalLoop
 
-createUser :: Handle -> DB.Connection -> IO User
-createUser hdl dbConn =
+createUser :: Handle -> MVar [User] -> DB.Connection -> IO User
+createUser hdl users dbConn =
     let addUser = do
             lift $ hPutStr hdl "Type a new username: "
             uname <- lift $ init <$> hGetLine hdl
             lift $ hPutStr hdl "Type a new password: "
             pwd   <- lift $ init <$> hGetLine hdl
             DB.addUser dbConn (T.pack uname) (T.pack pwd)
-            return uname
+            (DB.UserField id_ u _) <- noteT "Failed to log in." $
+                DB.login dbConn (T.pack uname) (T.pack pwd)
+            let user = (id_, T.unpack u)
+            noteT "Failed to log in." $ addLoginUser user users
+            return user
         evalLoop = do
             result <- runExceptT addUser
             case result of
-              Left e  -> hPutStrLn hdl e >> evalLoop
-              Right u -> return u
+              Left  e    -> hPutStrLn hdl e >> evalLoop
+              Right user -> return user
      in evalLoop
 
-loginUser :: Handle -> DB.Connection -> IO User
-loginUser hdl dbConn =
+loginUser :: Handle -> MVar [User] -> DB.Connection -> IO User
+loginUser hdl users dbConn =
     let login = do
             lift $ hPutStr hdl "Username: "
             uname <- lift $ init <$> hGetLine hdl
             lift $ hPutStr hdl "Password: "
             pwd   <- lift $ init <$> hGetLine hdl
-            DB.login dbConn (T.pack uname) (T.pack pwd)
+            (DB.UserField id_ u _) <- noteT "Invalid username or password." $
+                DB.login dbConn (T.pack uname) (T.pack pwd)
+            let user = (id_, T.unpack u)
+            noteT "User already logged in." $ addLoginUser user users
+            return user
         evalLoop = do
-            result <- runMaybeT login
+            result <- runExceptT login
             case result of
-              Nothing -> hPutStrLn hdl "Invalid username or password" >>
-                  evalLoop
-              Just (DB.UserField _ u _) -> return $ T.unpack u
+              Left  e    -> hPutStrLn hdl e >> evalLoop
+              Right user -> return user
      in evalLoop
+
+-- Add a user to the list of logged in users,
+-- unless the user is already logged in.
+addLoginUser :: User -> MVar [User] -> MaybeT IO ()
+addLoginUser user@(id_, _) users = do
+    -- Check if the user is already logged in by ID
+    alreadyLoggedIn <- lift $ elem id_ . map fst <$> readMVar users
+    let addFunc = (:) user
+    if alreadyLoggedIn
+        then nothing
+        else lift $ modifyMVar_ users (return . addFunc)
+
+-- Remove a user of the list of logged in users.
+removeLogoutUser :: User -> MVar [User] -> IO ()
+removeLogoutUser (id_, _) users = do
+    let removeFunc = filter (\a -> fst a /= id_)
+    modifyMVar_ users (return . removeFunc)
 
 getTimeStr :: IO String
 getTimeStr = formatTime defaultTimeLocale "%F %T" <$> getCurrentTime
