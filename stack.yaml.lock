@@ -3,7 +3,14 @@
 # For more information, please see the documentation at:
 #   https://docs.haskellstack.org/en/stable/lock_files
 
-packages: []
+packages:
+- completed:
+    hackage: cryptonite-0.26@sha256:43c722f3770c31f4c5376e7aa42645b104834103312e217aa7fe79316416d6df,17352
+    pantry-tree:
+      size: 22455
+      sha256: cbec4c7bd57508339510f18df64827dbd65eb7ede00db07a463a36aecdda077c
+  original:
+    hackage: cryptonite-0.26@sha256:43c722f3770c31f4c5376e7aa42645b104834103312e217aa7fe79316416d6df,17352
 snapshots:
 - completed:
     size: 523541

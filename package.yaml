@@ -26,6 +26,8 @@ dependencies:
 - text          >= 1.2.3.1
 - errors        >= 2.3.0
 - transformers  >= 0.5.6.2
+- bytestring    >= 0.10.8.2
+- cryptonite    >= 0.26
 
 library:
   source-dirs: src

@@ -6,13 +6,14 @@ module Database.Types
     , toAlphaNumMaybe
     ) where
 
+import qualified Data.ByteString                as B
 import           Data.Char                      (isAlphaNum)
 import           Data.String                    (IsString (..))
 import qualified Data.Text                      as T
 import           Database.SQLite.Simple
 import           Database.SQLite.Simple.FromRow
 
-data UserField = UserField Int T.Text T.Text
+data UserField = UserField Int T.Text B.ByteString
     deriving Show
 
 instance FromRow UserField where

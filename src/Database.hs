@@ -14,8 +14,11 @@ module Database
 
 import           Control.Error
 import           Control.Exception.Base
+import           Control.Monad
 import           Control.Monad.Trans.Class
+import           Crypto
 import qualified Data.Text                 as T
+import           Data.Text.Encoding        (encodeUtf8)
 import           Database.SQLite.Simple
 import           Database.Types
 
@@ -53,8 +56,8 @@ addUser conn _uname _pwd = do
 
 _addUser :: Connection -> AlphaNum -> AlphaNum -> IO ()
 _addUser conn _uname _pwd = do
-    let uname = fromAlphaNum _uname
-    let pwd   = fromAlphaNum _pwd
+    let uname =  fromAlphaNum _uname
+    pwd       <- hashPassword _pwd
     execute conn "INSERT INTO users (username, password) \
                 \ VALUES (?,?)" (uname, pwd)
 
@@ -67,11 +70,13 @@ login conn _uname _pwd = do
 _login :: Connection -> AlphaNum -> AlphaNum -> MaybeT IO UserField
 _login conn _uname _pwd = do
     let uname = fromAlphaNum _uname
-    let pwd   = fromAlphaNum _pwd
     userFields <- lift $ query conn "SELECT * FROM users WHERE \
-                                    \ username=? AND password=?"
-                                    (uname, pwd) :: MaybeT IO [UserField]
-    hoistMaybe $ headMay userFields
+                                    \ username=?"
+                                    (Only uname) :: MaybeT IO [UserField]
+    userField@(UserField _ _ hash) <- hoistMaybe $ headMay userFields
+    -- Validate hashed password
+    guard (validatePassword _pwd hash)
+    return userField
 
 usernameFromText :: T.Text -> Either String AlphaNum
 usernameFromText _uname
