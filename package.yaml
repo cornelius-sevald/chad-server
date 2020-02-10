@@ -19,9 +19,13 @@ extra-source-files:
 description:         Please see the README on GitHub at <https://github.com/cornelius-sevald/chad-server#readme>
 
 dependencies:
-- base >= 4.7 && < 5
-- network >= 2.8.0.1
-- time >= 1.8.0.2
+- base          >= 4.7      && < 5
+- network       >= 2.8.0.1
+- time          >= 1.8.0.2
+- sqlite-simple >= 0.4.16.0
+- text          >= 1.2.3.1
+- errors        >= 2.3.0
+- transformers  >= 0.5.6.2
 
 library:
   source-dirs: src
