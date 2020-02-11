@@ -65,8 +65,8 @@ runSession hdl chan users (userID, name) = do
             writeChan chan (userID, "[" ++ ts ++ "] " ++ msg)
 
     broadcast $ "--> " ++ name ++ " entered the chat."
-    hPutStrLn hdl $ "Welcome " ++ name ++ "!"
-    hPutStrLn hdl   "Type ':help' for help."
+    hPutStr hdl $ "Welcome " ++ name ++ "!\r\n"
+    hPutStr hdl   "Type ':help' for help.\r\n"
 
     commLine <- dupChan chan        -- duplicate the channel
 
@@ -74,20 +74,20 @@ runSession hdl chan users (userID, name) = do
     readThread <- forkIO $ fix $ \loop -> do
         (nextID, line) <- readChan commLine
         -- Print the message, unless it is from this user.
-        unless (nextID == userID) $ hPutStrLn hdl line
+        unless (nextID == userID) $ hPutStr hdl (line ++ "\r\n")
         loop
 
     -- read lines from the socket and broadcast them to `chan`
     handle (\(SomeException _) -> return ()) $ fix $ \loop -> do
         line <- init <$> hGetLine hdl
         case line of
-          ":help" -> hPutStrLn hdl "Type ':quit' to quit and ':here' to list\
-                                  \ who is online." >> loop
+          ":help" -> hPutStr hdl "Type ':quit' to quit and ':here' to list\
+                                  \ who is online.\r\n" >> loop
           ":here" -> do
               online <- readMVar users
-              let printUser (_, name) = hPutStrLn hdl $ " - " ++ name
+              let printUser (_, name) = hPutStr hdl $ " - " ++ name ++ "\r\n"
               mapM_ printUser online >> loop
-          ":quit" -> hPutStrLn hdl "Bye!"
+          ":quit" -> hPutStr hdl "Bye!\r\n"
           -- otherwise, continue looping.
           _      -> broadcast (name ++ ": " ++ line) >> loop
 
@@ -106,7 +106,7 @@ loginOrSignUp hdl =
               ""  -> return True
               "L" -> return True
               "S" -> return False
-              _   -> hPutStrLn hdl "Invalid input" >> evalLoop
+              _   -> hPutStr hdl "Invalid input\r\n" >> evalLoop
      in evalLoop
 
 createUser :: Handle -> MVar [User] -> DB.Connection -> IO User
@@ -117,10 +117,10 @@ createUser hdl users dbConn =
             lift $ hPutStr hdl "Type a new password: "
             pwd   <- lift $ init <$> hGetLine hdl
 
-            lift $ hPutStrLn hdl "Creating user..."
+            lift $ hPutStr hdl "Creating user...\r\n"
             DB.addUser dbConn (T.pack uname) (T.pack pwd)
 
-            lift $ hPutStrLn hdl "Authenticating..."
+            lift $ hPutStr hdl "Authenticating...\r\n"
             (DB.UserField id_ u _) <- noteT "Failed to log in." $
                 DB.login dbConn (T.pack uname) (T.pack pwd)
             let user = (id_, T.unpack u)
@@ -129,7 +129,7 @@ createUser hdl users dbConn =
         evalLoop = do
             result <- runExceptT addUser
             case result of
-              Left  e    -> hPutStrLn hdl e >> evalLoop
+              Left  e    -> hPutStr hdl (e ++ "\r\n") >> evalLoop
               Right user -> return user
      in evalLoop
 
@@ -141,7 +141,7 @@ loginUser hdl users dbConn =
             lift $ hPutStr hdl "Password: "
             pwd   <- lift $ init <$> hGetLine hdl
 
-            lift $ hPutStrLn hdl "Authenticating..."
+            lift $ hPutStr hdl "Authenticating...\r\n"
             (DB.UserField id_ u _) <- noteT "Invalid username or password." $
                 DB.login dbConn (T.pack uname) (T.pack pwd)
             let user = (id_, T.unpack u)
@@ -150,7 +150,7 @@ loginUser hdl users dbConn =
         evalLoop = do
             result <- runExceptT login
             case result of
-              Left  e    -> hPutStrLn hdl e >> evalLoop
+              Left  e    -> hPutStr hdl (e ++ "\r\n") >> evalLoop
               Right user -> return user
      in evalLoop
 
